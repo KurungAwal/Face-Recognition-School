@@ -220,7 +220,7 @@ def get_attendance_status(name, date):
 def start_video_stream():
     video_capture = cv2.VideoCapture(0)
     video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
     video_capture.set(cv2.CAP_PROP_FPS, 30)
     
     detection_buffer = deque(maxlen=DETECTION_BUFFER_SIZE)

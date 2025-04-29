@@ -11,7 +11,6 @@ import tkinter as tk
 from tkinter import simpledialog, messagebox
 from collections import deque
 import pyttsx3
-import speech_recognition as sr
 
 # ===== Configuration =====
 TIME_CATEGORIES = {
@@ -38,14 +37,38 @@ os.makedirs(REGISTERED_FACES_DIR, exist_ok=True)
 DB_FILE = "attendance.db"
 FACE_RECOGNITION_THRESHOLD = 0.4
 DETECTION_BUFFER_SIZE = 5
+REGISTER_DELAY = 5  # Delay 5 detik setelah registrasi
+ATTENDANCE_DELAY = 2  # Delay 2 detik antara presensi
+
+# ===== Database Initialization =====
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS registered_faces
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT NOT NULL,
+                  role TEXT NOT NULL,
+                  encoding_path TEXT NOT NULL,
+                  image_path TEXT NOT NULL)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS attendance_records
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT NOT NULL,
+                  role TEXT NOT NULL,
+                  arrival_time TEXT NOT NULL,
+                  arrival_status TEXT NOT NULL,
+                  departure_time TEXT,
+                  date TEXT NOT NULL,
+                  notes TEXT)''')
+    conn.commit()
+    conn.close()
+
+init_db()
 
 # ===== Thread-safe TTS Manager =====
 class TTSManager:
     def __init__(self):
         self.queue = queue.Queue()
         self.engine = pyttsx3.init()
-        self.engine.setProperty('rate', 150)  # Slower speech rate
-        self.engine.setProperty('voice', 'id')  # Try to set Indonesian voice if available
         self.thread = threading.Thread(target=self._run_tts, daemon=True)
         self.thread.start()
     
@@ -72,74 +95,56 @@ class TTSManager:
 
 tts_manager = TTSManager()
 
-# ===== Voice Input Manager =====
-class VoiceInputManager:
+# ===== Face Cache =====
+class FaceCache:
     def __init__(self):
-        self.recognizer = sr.Recognizer()
-        self.microphone = sr.Microphone()
-        self.is_listening = False
+        self.encodings = []
+        self.names = []
+        self.roles = []
+        self.load_cache()
+    
+    def load_cache(self):
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute("SELECT name, role, encoding_path FROM registered_faces")
         
-    def listen_for_command(self, prompt=None):
-        if prompt:
-            tts_manager.speak(prompt)
+        self.encodings = []
+        self.names = []
+        self.roles = []
         
-        with self.microphone as source:
-            self.recognizer.adjust_for_ambient_noise(source)
+        for name, role, encoding_path in c.fetchall():
             try:
-                audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=5)
-                text = self.recognizer.recognize_google(audio, language="id-ID")
-                return text.lower()
-            except sr.UnknownValueError:
-                tts_manager.speak("Maaf, saya tidak bisa mendengar dengan jelas")
-                return None
-            except sr.RequestError:
-                tts_manager.speak("Maaf, layanan suara tidak tersedia")
-                return None
-            except sr.WaitTimeoutError:
-                tts_manager.speak("Tidak ada suara yang terdeteksi")
-                return None
+                encoding = np.load(encoding_path)
+                self.encodings.append(encoding)
+                self.names.append(name)
+                self.roles.append(role)
+            except Exception as e:
+                print(f"Error loading encoding: {e}")
+        
+        conn.close()
+    
+    def get_matches(self, face_encoding):
+        if not self.encodings:
+            return []
+        
+        distances = face_recognition.face_distance(self.encodings, face_encoding)
+        return [(self.names[i], self.roles[i]) for i, d in enumerate(distances) 
+                if d < FACE_RECOGNITION_THRESHOLD]
 
-voice_input = VoiceInputManager()
+face_cache = FaceCache()
 
-# ===== Database Initialization =====
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS registered_faces
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  name TEXT NOT NULL,
-                  role TEXT NOT NULL,
-                  encoding_path TEXT NOT NULL,
-                  image_path TEXT NOT NULL)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS attendance_records
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  name TEXT NOT NULL,
-                  role TEXT NOT NULL,
-                  arrival_time TEXT NOT NULL,
-                  arrival_status TEXT NOT NULL,
-                  departure_time TEXT,
-                  date TEXT NOT NULL,
-                  notes TEXT)''')
-    conn.commit()
-    conn.close()
-
-init_db()
-
-# ===== Face Registration with PNG =====
+# ===== Registration System =====
 def register_face(face_encoding, name, role, face_image):
     try:
         timestamp = int(time.time())
         base_filename = f"{name}_{role}_{timestamp}"
         
-        # Save face encoding
         encoding_file = os.path.join(REGISTERED_FACES_DIR, f"{base_filename}.npy")
         np.save(encoding_file, face_encoding)
         
-        # Save face image as PNG
         image_file = os.path.join(REGISTERED_FACES_DIR, f"{base_filename}.png")
         cv2.imwrite(image_file, cv2.cvtColor(face_image, cv2.COLOR_RGB2BGR))
         
-        # Save to database
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         c.execute("INSERT INTO registered_faces (name, role, encoding_path, image_path) VALUES (?, ?, ?, ?)",
@@ -147,49 +152,16 @@ def register_face(face_encoding, name, role, face_image):
         conn.commit()
         conn.close()
         
+        face_cache.load_cache()
+        
         print(f"Registered {name} as {role}")
         tts_manager.speak(f"Registrasi berhasil, {name} sebagai {role}")
         return True
     except Exception as e:
         print(f"Registration error: {e}")
-        tts_manager.speak("Gagal melakukan registrasi")
         return False
 
-# ===== Face Recognition =====
-def check_known_face(face_encoding):
-    results = []
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT name, role, encoding_path FROM registered_faces")
-    records = c.fetchall()
-    conn.close()
-    
-    for name, role, encoding_path in records:
-        try:
-            known_encoding = np.load(encoding_path)
-            distance = face_recognition.face_distance([known_encoding], face_encoding)[0]
-            if distance < FACE_RECOGNITION_THRESHOLD:
-                results.append((name, role))
-        except Exception as e:
-            print(f"Error loading encoding: {e}")
-    
-    return results
-
-# ===== Time Classification =====
-def get_time_category(check_time):
-    check_time = check_time.time()
-    
-    if TIME_CATEGORIES['on_time']['arrival'][0] <= check_time <= TIME_CATEGORIES['on_time']['arrival'][1]:
-        return 'on_time'
-    elif TIME_CATEGORIES['late']['arrival'][0] <= check_time <= TIME_CATEGORIES['late']['arrival'][1]:
-        return 'late'
-    elif TIME_CATEGORIES['permission']['arrival'][0] <= check_time <= TIME_CATEGORIES['permission']['arrival'][1]:
-        return 'permission'
-    elif TIME_CATEGORIES['departure']['time'][0] <= check_time <= TIME_CATEGORIES['departure']['time'][1]:
-        return 'departure'
-    return 'outside_hours'
-
-# ===== Attendance Recording =====
+# ===== Attendance System =====
 def record_attendance(name, role, record_time):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -234,9 +206,24 @@ def record_attendance(name, role, record_time):
 
 # ===== Helper Functions =====
 def ask_permission_reason():
-    tts_manager.speak("Silakan sebutkan alasan izin Anda")
-    reason = voice_input.listen_for_command()
+    root = tk.Tk()
+    root.withdraw()
+    reason = simpledialog.askstring("Alasan Izin", "Masukkan alasan izin:")
+    root.destroy()
     return reason if reason else "Tidak disebutkan"
+
+def get_time_category(check_time):
+    check_time = check_time.time()
+    
+    if TIME_CATEGORIES['on_time']['arrival'][0] <= check_time <= TIME_CATEGORIES['on_time']['arrival'][1]:
+        return 'on_time'
+    elif TIME_CATEGORIES['late']['arrival'][0] <= check_time <= TIME_CATEGORIES['late']['arrival'][1]:
+        return 'late'
+    elif TIME_CATEGORIES['permission']['arrival'][0] <= check_time <= TIME_CATEGORIES['permission']['arrival'][1]:
+        return 'permission'
+    elif TIME_CATEGORIES['departure']['time'][0] <= check_time <= TIME_CATEGORIES['departure']['time'][1]:
+        return 'departure'
+    return 'outside_hours'
 
 def get_attendance_status(name, date):
     conn = sqlite3.connect(DB_FILE)
@@ -247,53 +234,17 @@ def get_attendance_status(name, date):
     conn.close()
     return result[0] if result else "Belum tercatat"
 
-# ===== Voice Registration Process =====
-def voice_registration_process(face_encoding, face_image):
-    tts_manager.speak("Silakan sebutkan nama Anda")
-    name = voice_input.listen_for_command()
-    
-    if not name:
-        tts_manager.speak("Registrasi dibatalkan")
-        return
-    
-    tts_manager.speak(f"Anda menyebutkan nama {name}. Sebagai apa Anda? Guru, siswa, atau staf?")
-    role = voice_input.listen_for_command()
-    
-    if not role:
-        tts_manager.speak("Registrasi dibatalkan")
-        return
-    
-    # Simple role mapping from voice input
-    if "guru" in role:
-        role = "Guru"
-    elif "siswa" in role or "murid" in role:
-        role = "Siswa"
-    elif "staf" in role or "staff" in role or "pegawai" in role:
-        role = "Staf"
-    else:
-        role = role.capitalize()
-    
-    tts_manager.speak(f"Konfirmasi, nama Anda {name} sebagai {role}. Benar?")
-    confirmation = voice_input.listen_for_command()
-    
-    if confirmation and ("ya" in confirmation or "benar" in confirmation or "betul" in confirmation):
-        if register_face(face_encoding, name, role, face_image):
-            return True
-    else:
-        tts_manager.speak("Registrasi dibatalkan")
-    
-    return False
-
 # ===== Main Video Processing =====
 def start_video_stream():
     video_capture = cv2.VideoCapture(0)
     video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
     video_capture.set(cv2.CAP_PROP_FPS, 30)
     
     detection_buffer = deque(maxlen=DETECTION_BUFFER_SIZE)
     last_register_time = 0
-    registration_active = False
+    last_attendance_time = 0
+    face_locations = []  # Initialize face_locations
     
     while True:
         ret, frame = video_capture.read()
@@ -303,51 +254,53 @@ def start_video_stream():
         small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
         rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
         
-        face_locations = face_recognition.face_locations(rgb_small_frame)
-        face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
-        
         current_time = datetime.now()
         
-        for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-            top *= 2; right *= 2; bottom *= 2; left *= 2
+        # Only process attendance if enough time has passed since last registration
+        if time.time() - last_register_time > REGISTER_DELAY:
+            face_locations = face_recognition.face_locations(rgb_small_frame)
+            face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
             
-            names_roles = check_known_face(face_encoding)
-            
-            if names_roles:
-                for name, role in names_roles:
-                    if name not in detection_buffer:
-                        record_attendance(name, role, current_time)
-                        detection_buffer.append(name)
-                    
-                    status = get_attendance_status(name, current_time.date())
-                    label = f"{name} ({role}) - {status}"
-            else:
-                label = "Tekan 'R' untuk registrasi dengan suara"
-            
-            cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
-            cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 0, 255), cv2.FILLED)
-            cv2.putText(frame, label, (left + 6, bottom - 6), cv2.FONT_HERSHEY_DUPLEX, 0.7, (255, 255, 255), 1)
+            for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+                top *= 2; right *= 2; bottom *= 2; left *= 2
+                
+                names_roles = face_cache.get_matches(face_encoding)
+                
+                if names_roles and time.time() - last_attendance_time > ATTENDANCE_DELAY:
+                    for name, role in names_roles:
+                        if name not in detection_buffer:
+                            record_attendance(name, role, current_time)
+                            detection_buffer.append(name)
+                            last_attendance_time = time.time()
+                        
+                        status = get_attendance_status(name, current_time.date())
+                        label = f"{name} ({role}) - {status}"
+                else:
+                    label = "Tekan 'R' untuk registrasi"
+                
+                cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
+                cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 0, 255), cv2.FILLED)
+                cv2.putText(frame, label, (left + 6, bottom - 6), cv2.FONT_HERSHEY_DUPLEX, 0.7, (255, 255, 255), 1)
 
         cv2.imshow('Sistem Presensi Sekolah', frame)
         key = cv2.waitKey(1) & 0xFF
 
-        if key == ord('r') and (time.time() - last_register_time) > 3 and not registration_active:
-            if face_encodings:
+        if key == ord('r') and (time.time() - last_register_time) > REGISTER_DELAY:
+            if face_locations:  # Check if face_locations is not empty
                 (top, right, bottom, left) = face_locations[0]
                 face_image = rgb_small_frame[top:bottom, left:right]
+                face_encodings = face_recognition.face_encodings(rgb_small_frame, [face_locations[0]])
                 
-                registration_active = True
-                tts_manager.speak("Memulai proses registrasi wajah")
-                
-                # Start registration in a separate thread to avoid freezing the video
-                def registration_thread():
-                    nonlocal last_register_time, registration_active
-                    if voice_registration_process(face_encodings[0], face_image):
-                        last_register_time = time.time()
-                    registration_active = False
-                
-                threading.Thread(target=registration_thread, daemon=True).start()
-                
+                if face_encodings:
+                    root = tk.Tk()
+                    root.withdraw()
+                    name = simpledialog.askstring("Registrasi", "Masukkan nama:")
+                    if name:
+                        role = simpledialog.askstring("Registrasi", "Sebagai apa (Guru/Siswa/Staf):")
+                        if role and register_face(face_encodings[0], name, role, face_image):
+                            messagebox.showinfo("Sukses", "Registrasi berhasil!")
+                            last_register_time = time.time()
+                    root.destroy()
         elif key == ord('q'):
             break
 
@@ -356,5 +309,4 @@ def start_video_stream():
     tts_manager.shutdown()
 
 if __name__ == "__main__":
-    tts_manager.speak("Sistem presensi sekolah siap digunakan")
     start_video_stream()
