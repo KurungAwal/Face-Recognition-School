@@ -12,6 +12,8 @@ from tkinter import simpledialog, messagebox
 from collections import deque
 import pyttsx3
 
+#Made by ......
+
 # ===== Configuration =====
 TIME_CATEGORIES = {
     'on_time': {
