@@ -13,6 +13,8 @@ from collections import deque
 import pyttsx3
 import bcrypt
 
+#Create 
+
 # ===== Configuration =====
 TIME_CATEGORIES = {
     'on_time': {
