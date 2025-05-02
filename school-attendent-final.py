@@ -14,6 +14,7 @@ import pyttsx3
 import bcrypt
 import csv
 
+
 # Program by Kelompok 2
 TIME_CATEGORIES = {
     'on_time': {
