@@ -12,8 +12,7 @@ from tkinter import ttk, simpledialog, messagebox
 from collections import deque
 import pyttsx3
 import bcrypt
-
-#Create 
+import csv
 
 # ===== Configuration =====
 TIME_CATEGORIES = {
@@ -43,6 +42,8 @@ FACE_RECOGNITION_THRESHOLD = 0.4
 DETECTION_BUFFER_SIZE = 5
 REGISTER_DELAY = 5
 ADMIN_DELAY = 2
+REPORTS_DIR = "reports"
+os.makedirs(REPORTS_DIR, exist_ok=True)
 
 # ===== Database Initialization =====
 def init_db():
@@ -65,7 +66,7 @@ def init_db():
                   departure_time TEXT,
                   date TEXT NOT NULL,
                   notes TEXT,
-                  auto_departure BOOLEAN DEFAULT 0)''')  # Tambah kolom untuk menandai auto-departure
+                  auto_departure BOOLEAN DEFAULT 0)''')
     
     c.execute('''CREATE TABLE IF NOT EXISTS admin_users
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -190,7 +191,7 @@ class AttendanceSystem:
             arrival_datetime = datetime.strptime(f"{today} {arrival_time}", "%Y-%m-%d %H:%M:%S")
             
             # Calculate departure time (arrival + school duration)
-            departure_time = (arrival_datetime + SCHOOL_DURATION).strftime("%H:%M:%S")
+            departure_time = (arrival_datetime + SCHOOL_DURATION).time().strftime("%H:%M:%S")
             
             # Update record with auto departure
             c.execute('''UPDATE attendance_records 
@@ -203,18 +204,59 @@ class AttendanceSystem:
         conn.commit()
         conn.close()
     
+    def generate_monthly_report(self, year, month):
+        """Generate a monthly attendance report in CSV format"""
+        filename = os.path.join(REPORTS_DIR, f"attendance_report_{year}_{month:02d}.csv")
+        
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        
+        # Get all records for the specified month
+        month_start = f"{year}-{month:02d}-01"
+        if month == 12:
+            month_end = f"{year+1}-01-01"
+        else:
+            month_end = f"{year}-{month+1:02d}-01"
+        
+        c.execute('''SELECT name, role, date, arrival_time, arrival_status, 
+                    departure_time, auto_departure, notes
+                    FROM attendance_records
+                    WHERE date >= ? AND date < ?
+                    ORDER BY name, date''', (month_start, month_end))
+        
+        records = c.fetchall()
+        
+        if not records:
+            return False, "Tidak ada catatan kehadiran untuk bulan yang dimaksud"
+        
+        # Write to CSV
+        with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            # Write header in Indonesian
+            writer.writerow(['Nama', 'Peran', 'Tanggal', 'Waktu Datang', 'Status Datang',
+                           'Waktu Pulang', 'Pulang Otomatis', 'Catatan'])
+            
+            for record in records:
+                writer.writerow(record)
+        
+        conn.close()
+        return True, filename
+    
     def process_attendance(self, frame, current_time):
         # Check for missing departures periodically
         if current_time.time() > TIME_CATEGORIES['departure']['time'][0]:
             self.check_missing_departures()
             
-        small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-        rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+        # Convert frame to RGB (for face recognition) while keeping original for display
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        small_frame = cv2.resize(rgb_frame, (0, 0), fx=0.5, fy=0.5)
         
-        face_locations = face_recognition.face_locations(rgb_small_frame)
-        face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
+        # Find face locations and encodings
+        face_locations = face_recognition.face_locations(small_frame)
+        face_encodings = face_recognition.face_encodings(small_frame, face_locations)
         
         for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+            # Scale back up face locations since we worked on a resized frame
             top *= 2; right *= 2; bottom *= 2; left *= 2
             
             names_roles = face_cache.get_matches(face_encoding)
@@ -230,6 +272,7 @@ class AttendanceSystem:
             else:
                 label = "Tekan 'R' untuk registrasi (Admin)"
             
+            # Draw on original frame (BGR format)
             cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
             cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 0, 255), cv2.FILLED)
             cv2.putText(frame, label, (left + 6, bottom - 6), cv2.FONT_HERSHEY_DUPLEX, 0.7, (255, 255, 255), 1)
@@ -348,17 +391,19 @@ class RegistrationSystem:
             
         self.is_registering = True
         try:
-            small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-            rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-            face_locations = face_recognition.face_locations(rgb_small_frame)
+            # Convert frame to RGB for face processing
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            small_frame = cv2.resize(rgb_frame, (0, 0), fx=0.5, fy=0.5)
+            face_locations = face_recognition.face_locations(small_frame)
             
             if not face_locations:
                 tts_manager.speak("Tidak ada wajah terdeteksi")
                 return
             
             (top, right, bottom, left) = face_locations[0]
-            face_image = rgb_small_frame[top:bottom, left:right]
-            face_encodings = face_recognition.face_encodings(rgb_small_frame, [face_locations[0]])
+            # Get face image from small frame (already RGB)
+            face_image = small_frame[top:bottom, left:right]
+            face_encodings = face_recognition.face_encodings(small_frame, [face_locations[0]])
             
             if not face_encodings:
                 tts_manager.speak("Gagal mengambil data wajah")
@@ -389,6 +434,7 @@ class RegistrationSystem:
             np.save(encoding_file, encoding)
             
             image_file = os.path.join(REGISTERED_FACES_DIR, f"{base_filename}.png")
+            # Convert back to BGR for saving as image
             cv2.imwrite(image_file, cv2.cvtColor(face_image, cv2.COLOR_RGB2BGR))
             
             conn = sqlite3.connect(DB_FILE)
@@ -405,6 +451,34 @@ class RegistrationSystem:
             print(f"Registration error: {e}")
             messagebox.showerror("Error", f"Gagal menyimpan data: {str(e)}")
             return False
+    
+    def generate_monthly_report(self):
+        if not self.authenticate_admin():
+            return
+            
+        root = tk.Tk()
+        root.withdraw()
+        
+        # Get year and month from user
+        year = simpledialog.askinteger("Laporan Bulanan", "Masukkan tahun:", 
+                                     minvalue=2000, maxvalue=2100)
+        if not year:
+            return
+            
+        month = simpledialog.askinteger("Laporan Bulanan", "Masukkan bulan (1-12):", 
+                                       minvalue=1, maxvalue=12)
+        if not month:
+            return
+            
+        # Generate report
+        success, result = attendance_system.generate_monthly_report(year, month)
+        
+        if success:
+            messagebox.showinfo("Sukses", f"Laporan berhasil dibuat:\n{result}")
+            tts_manager.speak("Laporan bulanan berhasil dibuat")
+        else:
+            messagebox.showerror("Error", result)
+            tts_manager.speak("Gagal membuat laporan")
 
 registration_system = RegistrationSystem()
 
@@ -415,6 +489,7 @@ class AttendanceApp:
         self.video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
         self.video_capture.set(cv2.CAP_PROP_FPS, 30)
+        self.last_admin_action = 0
     
     def run(self):
         tts_manager.speak("Sistem presensi siap digunakan")
@@ -425,14 +500,23 @@ class AttendanceApp:
                 break
 
             current_time = datetime.now()
+            
+            # Process attendance and get annotated frame
             processed_frame = attendance_system.process_attendance(frame.copy(), current_time)
             
+            # Display the resulting frame
             cv2.imshow('Sistem Presensi Sekolah', processed_frame)
             
             key = cv2.waitKey(1) & 0xFF
             
             if key == ord('r'):
-                registration_system.register_new_face(frame.copy())
+                if (time.time() - self.last_admin_action) > ADMIN_DELAY:
+                    registration_system.register_new_face(frame.copy())
+                    self.last_admin_action = time.time()
+            elif key == ord('p'):  # Press 'p' to generate monthly report
+                if (time.time() - self.last_admin_action) > ADMIN_DELAY:
+                    registration_system.generate_monthly_report()
+                    self.last_admin_action = time.time()
             elif key == ord('q'):
                 break
 
