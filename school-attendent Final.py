@@ -14,7 +14,7 @@ import pyttsx3
 import bcrypt
 import csv
 
-# Program by 
+# Program by Kelompok 2
 TIME_CATEGORIES = {
     'on_time': {
         'arrival': (dt_time(7, 30), dt_time(8, 0)),
@@ -34,7 +34,7 @@ TIME_CATEGORIES = {
     }
 }
 
-# SD Class Categories
+#Class SD
 SD_CLASSES = [
     "1", "2", "3", "4", "5", "6"
 ]
@@ -50,7 +50,7 @@ ADMIN_DELAY = 2
 REPORTS_DIR = "reports"
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
-# ===== Database Initialization =====
+# Inisialisasi Database
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -80,7 +80,7 @@ def init_db():
                   username TEXT UNIQUE NOT NULL,
                   password_hash TEXT NOT NULL)''')
     
-    # Insert default admin if not exists
+    # Admin 
     default_password = bcrypt.hashpw("admin123".encode('utf-8'), bcrypt.gensalt())
     c.execute("INSERT OR IGNORE INTO admin_users (username, password_hash) VALUES (?, ?)",
              ("admin", default_password))
@@ -90,7 +90,7 @@ def init_db():
 
 init_db()
 
-# ===== TTS Manager =====
+# TTS Manager
 class TTSManager:
     def __init__(self):
         self.queue = queue.Queue()
@@ -117,7 +117,7 @@ class TTSManager:
 
 tts_manager = TTSManager()
 
-# ===== Face Cache =====
+# Pengenalan Muka
 class FaceCache:
     def __init__(self):
         self.encodings = []
@@ -157,7 +157,7 @@ class FaceCache:
 
 face_cache = FaceCache()
 
-# ===== Attendance System =====
+# Sistem Absensi
 class AttendanceSystem:
     def __init__(self):
         self.detection_buffer = deque(maxlen=DETECTION_BUFFER_SIZE)
@@ -179,7 +179,7 @@ class AttendanceSystem:
         """Check and mark students who forgot to record departure"""
         now = datetime.now()
         
-        # Only check once per day after school hours
+        
         if now.date() == self.last_departure_check.date() or now.time() < TIME_CATEGORIES['departure']['time'][1]:
             return
             
@@ -189,7 +189,7 @@ class AttendanceSystem:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         
-        # Find students who came but didn't leave today
+        
         c.execute('''SELECT id, name, role, class, arrival_time 
                      FROM attendance_records 
                      WHERE date=? AND departure_time IS NULL''', (today,))
@@ -200,10 +200,10 @@ class AttendanceSystem:
             record_id, name, role, sclass, arrival_time = record
             arrival_datetime = datetime.strptime(f"{today} {arrival_time}", "%Y-%m-%d %H:%M:%S")
             
-            # Calculate departure time (arrival + school duration)
+            # Kalkulasi waktu kepulangan
             departure_time = (arrival_datetime + SCHOOL_DURATION).time().strftime("%H:%M:%S")
             
-            # Update record with auto departure
+            # Memunculkan suara untuk absensi
             c.execute('''UPDATE attendance_records 
                         SET departure_time=?, auto_departure=1
                         WHERE id=?''', (departure_time, record_id))
@@ -221,7 +221,7 @@ class AttendanceSystem:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         
-        # Get all records for the specified month
+        # Pencacatan bulanan
         month_start = f"{year}-{month:02d}-01"
         if month == 12:
             month_end = f"{year+1}-01-01"
@@ -239,10 +239,10 @@ class AttendanceSystem:
         if not records:
             return False, "Tidak ada catatan kehadiran untuk bulan yang dimaksud"
         
-        # Write to CSV
+        # Format ke dalam CSV
         with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.writer(csvfile)
-            # Write header in Indonesian
+            # Tulis dalam bahasa Indonesia
             writer.writerow(['Nama', 'Peran', 'Kelas', 'Tanggal', 'Waktu Datang', 'Status Datang',
                            'Waktu Pulang', 'Pulang Otomatis', 'Catatan'])
             
@@ -253,20 +253,20 @@ class AttendanceSystem:
         return True, filename
     
     def process_attendance(self, frame, current_time):
-        # Check for missing departures periodically
+       
         if current_time.time() > TIME_CATEGORIES['departure']['time'][0]:
             self.check_missing_departures()
             
-        # Convert frame to RGB (for face recognition) while keeping original for display
+        # Konversi frame ke RGB untuk face-recognition
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         small_frame = cv2.resize(rgb_frame, (0, 0), fx=0.5, fy=0.5)
         
-        # Find face locations and encodings
+        # Mencari lokasi wajah
         face_locations = face_recognition.face_locations(small_frame)
         face_encodings = face_recognition.face_encodings(small_frame, face_locations)
         
         for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-            # Scale back up face locations since we worked on a resized frame
+            # Skala
             top *= 2; right *= 2; bottom *= 2; left *= 2
             
             names_roles = face_cache.get_matches(face_encoding)
@@ -283,7 +283,7 @@ class AttendanceSystem:
             else:
                 label = "Tekan 'R' untuk registrasi (Admin)"
             
-            # Draw on original frame (BGR format)
+            # Gambar kotak pada frame asli
             cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
             cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 0, 255), cv2.FILLED)
             cv2.putText(frame, label, (left + 6, bottom - 6), cv2.FONT_HERSHEY_DUPLEX, 0.7, (255, 255, 255), 1)
@@ -306,7 +306,7 @@ class AttendanceSystem:
         record = c.fetchone()
         
         if not record:
-            # Record arrival
+            # Rekord kedatangan
             status_label = TIME_CATEGORIES[time_category]['label'] if time_category in ['on_time', 'late', 'permission'] else "Outside Hours"
             c.execute('''INSERT INTO attendance_records 
                         (name, role, class, arrival_time, arrival_status, date, notes) 
@@ -323,7 +323,7 @@ class AttendanceSystem:
             print(f"{name} ({role}) Kelas {sclass} {status_label} at {current_time}")
         
         elif time_category == 'departure' and not record[1]:
-            # Record departure if not already recorded
+            # Rekord kepulangan jika tidak terjadi rekaman
             c.execute('''UPDATE attendance_records 
                         SET departure_time=?
                         WHERE id=?''',
@@ -363,7 +363,7 @@ class AttendanceSystem:
 
 attendance_system = AttendanceSystem()
 
-# ===== Registration System =====
+# Sistem registrasi
 class RegistrationSystem:
     def __init__(self):
         self.is_registering = False
@@ -402,7 +402,7 @@ class RegistrationSystem:
             
         self.is_registering = True
         try:
-            # Convert frame to RGB for face processing
+            # Konversi wajah ke RGB untuk prosesi wajah
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             small_frame = cv2.resize(rgb_frame, (0, 0), fx=0.5, fy=0.5)
             face_locations = face_recognition.face_locations(small_frame)
@@ -412,7 +412,6 @@ class RegistrationSystem:
                 return
             
             (top, right, bottom, left) = face_locations[0]
-            # Get face image from small frame (already RGB)
             face_image = small_frame[top:bottom, left:right]
             face_encodings = face_recognition.face_encodings(small_frame, [face_locations[0]])
             
@@ -428,7 +427,7 @@ class RegistrationSystem:
             if not role:
                 return
             
-            # Only ask for class if role is "Siswa"
+            # Klasifikasi kelas dilakukan hanya pada siswa
             sclass = ""
             if role.lower() == "siswa":
                 sclass = self.ask_for_class()
@@ -447,7 +446,7 @@ class RegistrationSystem:
         root = tk.Tk()
         root.withdraw()
         
-        # Create a simple dialog to select class
+        # Dialog mengenai kelas siswa
         class_dialog = tk.Toplevel()
         class_dialog.title("Pilih Kelas")
         class_dialog.geometry("300x200")
@@ -480,7 +479,6 @@ class RegistrationSystem:
             np.save(encoding_file, encoding)
             
             image_file = os.path.join(REGISTERED_FACES_DIR, f"{base_filename}.png")
-            # Convert back to BGR for saving as image
             cv2.imwrite(image_file, cv2.cvtColor(face_image, cv2.COLOR_RGB2BGR))
             
             conn = sqlite3.connect(DB_FILE)
@@ -505,7 +503,7 @@ class RegistrationSystem:
         root = tk.Tk()
         root.withdraw()
         
-        # Get year and month from user
+        # Catatan tahun
         year = simpledialog.askinteger("Laporan Bulanan", "Masukkan tahun:", 
                                      minvalue=2000, maxvalue=2100)
         if not year:
@@ -516,7 +514,7 @@ class RegistrationSystem:
         if not month:
             return
             
-        # Generate report
+        # Buat report
         success, result = attendance_system.generate_monthly_report(year, month)
         
         if success:
@@ -528,7 +526,7 @@ class RegistrationSystem:
 
 registration_system = RegistrationSystem()
 
-# ===== Main Application =====
+# Aplikasi
 class AttendanceApp:
     def __init__(self):
         self.video_capture = cv2.VideoCapture(0)
@@ -547,10 +545,9 @@ class AttendanceApp:
 
             current_time = datetime.now()
             
-            # Process attendance and get annotated frame
             processed_frame = attendance_system.process_attendance(frame.copy(), current_time)
             
-            # Display the resulting frame
+            # Menampilkan frame akhir
             cv2.imshow('Sistem Presensi Sekolah', processed_frame)
             
             key = cv2.waitKey(1) & 0xFF
@@ -559,7 +556,7 @@ class AttendanceApp:
                 if (time.time() - self.last_admin_action) > ADMIN_DELAY:
                     registration_system.register_new_face(frame.copy())
                     self.last_admin_action = time.time()
-            elif key == ord('p'):  # Press 'p' to generate monthly report
+            elif key == ord('p'):  #Pencet p untuk generate laporan bulanan
                 if (time.time() - self.last_admin_action) > ADMIN_DELAY:
                     registration_system.generate_monthly_report()
                     self.last_admin_action = time.time()
