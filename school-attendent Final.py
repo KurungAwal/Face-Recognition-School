@@ -14,7 +14,7 @@ import pyttsx3
 import bcrypt
 import csv
 
-# ===== Configuration =====
+# Program by 
 TIME_CATEGORIES = {
     'on_time': {
         'arrival': (dt_time(7, 30), dt_time(8, 0)),
@@ -33,6 +33,11 @@ TIME_CATEGORIES = {
         'label': 'Pulang'
     }
 }
+
+# SD Class Categories
+SD_CLASSES = [
+    "1", "2", "3", "4", "5", "6"
+]
 
 SCHOOL_DURATION = timedelta(hours=8)  # Durasi sekolah 8 jam
 REGISTERED_FACES_DIR = "registered_faces"
@@ -54,6 +59,7 @@ def init_db():
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   name TEXT NOT NULL,
                   role TEXT NOT NULL,
+                  class TEXT,
                   encoding_path TEXT NOT NULL,
                   image_path TEXT NOT NULL)''')
                   
@@ -61,6 +67,7 @@ def init_db():
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   name TEXT NOT NULL,
                   role TEXT NOT NULL,
+                  class TEXT,
                   arrival_time TEXT NOT NULL,
                   arrival_status TEXT NOT NULL,
                   departure_time TEXT,
@@ -116,23 +123,26 @@ class FaceCache:
         self.encodings = []
         self.names = []
         self.roles = []
+        self.classes = []
         self.load_cache()
     
     def load_cache(self):
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        c.execute("SELECT name, role, encoding_path FROM registered_faces")
+        c.execute("SELECT name, role, class, encoding_path FROM registered_faces")
         
         self.encodings = []
         self.names = []
         self.roles = []
+        self.classes = []
         
-        for name, role, encoding_path in c.fetchall():
+        for name, role, sclass, encoding_path in c.fetchall():
             try:
                 encoding = np.load(encoding_path)
                 self.encodings.append(encoding)
                 self.names.append(name)
                 self.roles.append(role)
+                self.classes.append(sclass)
             except Exception as e:
                 print(f"Error loading encoding: {e}")
         
@@ -142,7 +152,7 @@ class FaceCache:
         if not self.encodings:
             return []
         distances = face_recognition.face_distance(self.encodings, face_encoding)
-        return [(self.names[i], self.roles[i]) for i, d in enumerate(distances) 
+        return [(self.names[i], self.roles[i], self.classes[i]) for i, d in enumerate(distances) 
                 if d < FACE_RECOGNITION_THRESHOLD]
 
 face_cache = FaceCache()
@@ -180,14 +190,14 @@ class AttendanceSystem:
         c = conn.cursor()
         
         # Find students who came but didn't leave today
-        c.execute('''SELECT id, name, role, arrival_time 
+        c.execute('''SELECT id, name, role, class, arrival_time 
                      FROM attendance_records 
                      WHERE date=? AND departure_time IS NULL''', (today,))
         
         missing_departures = c.fetchall()
         
         for record in missing_departures:
-            record_id, name, role, arrival_time = record
+            record_id, name, role, sclass, arrival_time = record
             arrival_datetime = datetime.strptime(f"{today} {arrival_time}", "%Y-%m-%d %H:%M:%S")
             
             # Calculate departure time (arrival + school duration)
@@ -198,8 +208,8 @@ class AttendanceSystem:
                         SET departure_time=?, auto_departure=1
                         WHERE id=?''', (departure_time, record_id))
             
-            print(f"[AUTO] {name} ({role}) marked as departed at {departure_time}")
-            tts_manager.speak(f"Catatan: {name} dianggap pulang pukul {departure_time}")
+            print(f"[AUTO] {name} ({role}) Kelas {sclass} marked as departed at {departure_time}")
+            tts_manager.speak(f"Catatan: {name} kelas {sclass} dianggap pulang pukul {departure_time}")
         
         conn.commit()
         conn.close()
@@ -218,11 +228,11 @@ class AttendanceSystem:
         else:
             month_end = f"{year}-{month+1:02d}-01"
         
-        c.execute('''SELECT name, role, date, arrival_time, arrival_status, 
+        c.execute('''SELECT name, role, class, date, arrival_time, arrival_status, 
                     departure_time, auto_departure, notes
                     FROM attendance_records
                     WHERE date >= ? AND date < ?
-                    ORDER BY name, date''', (month_start, month_end))
+                    ORDER BY class, name, date''', (month_start, month_end))
         
         records = c.fetchall()
         
@@ -233,7 +243,7 @@ class AttendanceSystem:
         with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.writer(csvfile)
             # Write header in Indonesian
-            writer.writerow(['Nama', 'Peran', 'Tanggal', 'Waktu Datang', 'Status Datang',
+            writer.writerow(['Nama', 'Peran', 'Kelas', 'Tanggal', 'Waktu Datang', 'Status Datang',
                            'Waktu Pulang', 'Pulang Otomatis', 'Catatan'])
             
             for record in records:
@@ -262,13 +272,14 @@ class AttendanceSystem:
             names_roles = face_cache.get_matches(face_encoding)
             
             if names_roles:
-                for name, role in names_roles:
+                for name, role, sclass in names_roles:
                     if name not in self.detection_buffer:
-                        self.record_attendance(name, role, current_time)
+                        self.record_attendance(name, role, sclass, current_time)
                         self.detection_buffer.append(name)
                     
                     status = self.get_attendance_status(name, current_time.date())
-                    label = f"{name} ({role}) - {status}"
+                    class_display = f"Kelas {sclass}" if sclass else ""
+                    label = f"{name} ({role}) {class_display} - {status}"
             else:
                 label = "Tekan 'R' untuk registrasi (Admin)"
             
@@ -279,7 +290,7 @@ class AttendanceSystem:
         
         return frame
     
-    def record_attendance(self, name, role, record_time):
+    def record_attendance(self, name, role, sclass, record_time):
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         current_date = record_time.strftime("%Y-%m-%d")
@@ -298,9 +309,9 @@ class AttendanceSystem:
             # Record arrival
             status_label = TIME_CATEGORIES[time_category]['label'] if time_category in ['on_time', 'late', 'permission'] else "Outside Hours"
             c.execute('''INSERT INTO attendance_records 
-                        (name, role, arrival_time, arrival_status, date, notes) 
-                        VALUES (?, ?, ?, ?, ?, ?)''',
-                     (name, role, current_time, status_label, current_date, notes))
+                        (name, role, class, arrival_time, arrival_status, date, notes) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                     (name, role, sclass, current_time, status_label, current_date, notes))
             
             if time_category == 'on_time':
                 tts_manager.speak(f"Selamat pagi {name}, hadir tepat waktu")
@@ -309,7 +320,7 @@ class AttendanceSystem:
             elif time_category == 'permission':
                 tts_manager.speak(f"{name}, izin dengan alasan {notes}")
             
-            print(f"{name} ({role}) {status_label} at {current_time}")
+            print(f"{name} ({role}) Kelas {sclass} {status_label} at {current_time}")
         
         elif time_category == 'departure' and not record[1]:
             # Record departure if not already recorded
@@ -318,7 +329,7 @@ class AttendanceSystem:
                         WHERE id=?''',
                      (current_time, record[0]))
             tts_manager.speak(f"Selamat jalan {name}")
-            print(f"{name} ({role}) pulang pada {current_time}")
+            print(f"{name} ({role}) Kelas {sclass} pulang pada {current_time}")
         
         conn.commit()
         conn.close()
@@ -417,7 +428,14 @@ class RegistrationSystem:
             if not role:
                 return
             
-            if self.save_face_data(face_encodings[0], name, role, face_image):
+            # Only ask for class if role is "Siswa"
+            sclass = ""
+            if role.lower() == "siswa":
+                sclass = self.ask_for_class()
+                if not sclass:
+                    return
+            
+            if self.save_face_data(face_encodings[0], name, role, sclass, face_image):
                 messagebox.showinfo("Sukses", "Registrasi berhasil!")
                 tts_manager.speak(f"Registrasi berhasil untuk {name}")
             
@@ -425,10 +443,38 @@ class RegistrationSystem:
             self.is_registering = False
             self.last_register_time = time.time()
     
-    def save_face_data(self, encoding, name, role, face_image):
+    def ask_for_class(self):
+        root = tk.Tk()
+        root.withdraw()
+        
+        # Create a simple dialog to select class
+        class_dialog = tk.Toplevel()
+        class_dialog.title("Pilih Kelas")
+        class_dialog.geometry("300x200")
+        
+        label = tk.Label(class_dialog, text="Pilih Kelas SD:")
+        label.pack(pady=10)
+        
+        class_var = tk.StringVar()
+        class_combobox = ttk.Combobox(class_dialog, textvariable=class_var, values=SD_CLASSES)
+        class_combobox.pack(pady=10)
+        class_combobox.current(0)
+        
+        def on_ok():
+            class_dialog.selected_class = class_var.get()
+            class_dialog.destroy()
+        
+        ok_button = tk.Button(class_dialog, text="OK", command=on_ok)
+        ok_button.pack(pady=10)
+        
+        class_dialog.wait_window()
+        
+        return getattr(class_dialog, 'selected_class', "")
+    
+    def save_face_data(self, encoding, name, role, sclass, face_image):
         try:
             timestamp = int(time.time())
-            base_filename = f"{name}_{role}_{timestamp}"
+            base_filename = f"{name}_{role}_{sclass}_{timestamp}" if sclass else f"{name}_{role}_{timestamp}"
             
             encoding_file = os.path.join(REGISTERED_FACES_DIR, f"{base_filename}.npy")
             np.save(encoding_file, encoding)
@@ -439,8 +485,8 @@ class RegistrationSystem:
             
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
-            c.execute("INSERT INTO registered_faces (name, role, encoding_path, image_path) VALUES (?, ?, ?, ?)",
-                     (name, role, encoding_file, image_file))
+            c.execute("INSERT INTO registered_faces (name, role, class, encoding_path, image_path) VALUES (?, ?, ?, ?, ?)",
+                     (name, role, sclass, encoding_file, image_file))
             conn.commit()
             conn.close()
             
