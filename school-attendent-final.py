@@ -30,17 +30,17 @@ TIME_CATEGORIES = {
         'label': 'Izin'
     },
     'departure': {
-        'time': (dt_time(15, 0), dt_time(18, 0)),  # Jam pulang 15:00-18:00
+        'time': (dt_time(14, 0), dt_time(18, 0)),  # Jam pulang 14:00-18:00
         'label': 'Pulang'
     }
 }
 
 #Class SD
 SD_CLASSES = [
-    "1", "2", "3", "4", "5", "6"
+    "1", "2", "3", "4"
 ]
 
-SCHOOL_DURATION = timedelta(hours=8)  # Durasi sekolah 8 jam
+SCHOOL_DURATION = timedelta(hours=18)  # Durasi jika siswa lupa absensi pulang
 REGISTERED_FACES_DIR = "registered_faces"
 os.makedirs(REGISTERED_FACES_DIR, exist_ok=True)
 DB_FILE = "attendance.db"
