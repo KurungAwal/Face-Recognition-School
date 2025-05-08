@@ -1,13 +1,15 @@
 # Dokumentasi Instalasi Project School Attendance
 
-# Apa Saja yang Perlu di Install?
+**Apa Saja yang Perlu di Install?**
 1. cv2
 2. face_recognition
 3. os
 4. numpy
 5. json
 6. tkinter
-7. pyttsx3
+7. Pyttsx3
+8. dlib 
+
 
 # 1. Cara Menginstall CV2
 OpenCV atau cv2 adalah library wajib untuk capture kamera dan proses gambar.
@@ -181,72 +183,73 @@ Trouble dan Solusinya
     
     Control Panel > Speech Recognition > Text to Speech
 
+# Cara Menginstall Dlib
+Fungsi utama dlib antara lain: 
+1. DLib dapat mengidentifikasi 68 titik kunci (landmark) pada wajah manusia, seperti Bentuk wajah (garis rahang, dagu), Alis (titik kiri dan kanan), Mata (kelopak, pupil), Hidung (ujung, pangkal hidung), Mulut (bibir atas dan bawah, sudut mulut)
 
-# Dokumentasi Proses Project School Attendance
+Cara install untuk window:
+1. Instal CMake (diperlukan untuk kompilasi): 
 
-# 1. Inisialisasi dan Setup Awal
-1. Instal library seperti OpenCV, face_recognition, numpy, pyttsx3.
+pip install cmake
 
-2. Buat folder dan file untuk menyimpan: Encoding wajah, Metadata pengguna, Riwayat kehadiran
+2. Install Dlib: pip install dlib
 
-# 2. Membuka Kamera dan Menangkap Frame
-1. Akses webcam menggunakan 
+3. Jika mengalami masalah, Anda bisa mencoba menginstal binary yang sudah dikompilasi: 
 
-    cv2.VideoCapture()
+pip install dlib-19.19.0-cp38-cp38-win_amd64.whl
 
-2. Tangkap frame secara real-time untuk diproses.
+Cara install untuk MacOS:
+1. Pastikan Anda memiliki Xcode dan command line tools terinstal:
 
-# 3. Deteksi dan Pengenalan Wajah
-1. Deteksi wajah dalam frame
+xcode-select --install
 
-2. Encode wajah yang terdeteksi
+2. Instal dependensi dengan Homebrew:
 
-3. Bandingkan encoding wajah dengan database wajah yang sudah tersimpan.
+brew install cmake
+brew install boost
+brew install boost-python3
 
-# 4. Pencatatan Kehadiran Otomatis
-1. Jika wajah dikenali: 
+3. Instal DLib melalui pip:
 
-    Catat waktu datang jika belum tercatat. 
-    
-    Jika sudah pernah tercatat dan wajah tidak terdeteksi lagi → waktu pulang
+pip install dlib
 
-2. Hitung durasi kehadiran dari waktu datang hingga pulang.
+4. Verifikasi instalasi:
 
-3. Simpan data ke dalam file Excel dan database lokal.
+import dlib
+print(dlib.__version__)
 
-# 5. Penyapa Otomatis (Text-to-Speech)
-1. Setelah wajah dikenali: 
 
-    Sistem menyapa pengguna saat datang: 
-    
-    “Selamat pagi, [nama]”
+# Dokumentasi Cara Kerja
+1. Import Library: Mengimpor semua modul yang dibutuhkan seperti yang sudah di cantumkan di atas.
 
-2. Sistem mengucapkan selamat jalan saat pulang: 
+2. Membuat folder penyimpanan data wajah yang terdaftar dan hasil deteksi
 
-    “Selamat jalan, [nama]” menggunakan library pyttsx3.
+4. Inisialisasi text-to-speech: Menyiapkan sistem suara untuk menyapa pengguna
 
-# 6. Registrasi Wajah Baru
-1. Jika wajah tidak dikenali: 
+5. Mengaktifkan kamera dan memproses untuk mendeteksi wajah secara langsung menggunakan start_video_stream()
 
-    Sistem menampilkan perintah: 
-    
-    tekan s untuk mendaftar. 
-    
-    Setelah ditekan, muncul form (CLI atau GUI) untuk input: Nama, Kelas, Peran.
+6. Membaca dan mengambil gambar setiap frame dari webcam
 
-2. Wajah diambil dan encoding disimpan ke faces.npy, metadata ke faces.json.
+7. Supaya wajah lebih mudah dikenali sistem akan meningkatkan pencahayaan pada gambar menggunakan improve_lighting(image)
 
-# 7. Penyimpanan Screenshot Kehadiran
-1. Saat pengguna hadir dan dikenali, sistem otomatis mengambil screenshot.
+8. Mendeteksi wajah dan menghitung encodingnya 
 
-2. Gambar disimpan ke folder lokal
+9. Mengenali dan membandingkan wajah yang terdeteksi dengan data yang sudah tersimpan dan memberikan nama serta peran yang sesuai dengan wajah menggunakan check_known_face
 
-# 8. Keluar dari Program
-1. Tekan tombol Q di keyboard.
+10. Jika wajah dikenal saat pertama kali hadir maka sistem akan menyimpan waktu kedatangan, berikan ucapan selamat datang dan menyimoan foto wajah
 
-2. Kamera mati.
+11. Jika wajahdikenal setekah jam 15.00 maka sistem akan menyimpan waktu pulang, memberikan ucapan selamat jalan dan menyimpan foto wajah
 
-3. Jendela video ditutup
+12. Jika wajah tidak bisa dikenali maka siste akan menampilkan label press s untuk registrasi
+
+13. Layar akan menampilkan kotak yang bertuliskan nama pemilik wajah tersebut
+
+14. Untuk registrasi wajah baru maka setelah menekan s maka akan menampilkan dialog untuk imput nama dan peran serta menyimpan wajah yang terdeteksi
+
+15. Untuk keluar dari program tekan q maka akan menutup kamera dan jendela video
+
+16. Jalankan start_video_stram() untuk memulai proses seperti sebelumnya
+ 
 
 # Dokumentasi Cara Penggunaan untuk User
 1. Pastikan wajah kamu terlihat jelas di depan kamera
@@ -256,3 +259,37 @@ Trouble dan Solusinya
 3. Jika wajahmu belum terdaftar: Layar akan menunjukkan press S to register. Kamu akan diminta untuk menuliskan nama lengkap dan peran. Setelah terdaftar maka wajahmu dapat dikenali secara otomatis saat absensi berikutnya.
 
 4. Setelah jam 15.00, ulangi menghadap kamera, setelah kamera mengenali dan menyapa "Selamat Jalan [Nama]" maka kamu sudah terabsen pulang.
+
+# Dokumentasi Hasil Riset
+**Library Alternatif**
+1. Dear PyGui sebagai pengganti tkinter
+
+**Perbandingannya dengan tkinter:**
+1. Dear PyGui memiliki performansi yang sangat cepat (GPU-Accelerated) dibandingkan dengan tkinter yang lambat untuk mendeteksi secara real time (CPU-Based)
+2. Dear PyGui memiliki tampilan UI yang lebih modern
+
+**Cara instalasi Dear PyGui**
+1. Jalankan perintah: 
+pip install dearpygui
+
+# Dokumentasi Hasil Testing Awal
+**Apa Saja yang Perlu Diperbaiki?**
+1. Kondisi kamera yang sering ngelag saat sudah register
+2. Tambahkan fitur login admin sebelum bisa melakukan registrasi wajah baru atau ekspor data
+3. Tambahkan fitur registrasi ulang
+
+# Dokumentasi Hasil Testing Keberangkatan
+**Date: 6 May 2025**
+
+**Apa Saja yang Perlu Diperbaiki?**
+1. Akurasi face_recognition kurang akurat. Terkadang target terdeteksi menjadi target lain.
+2. Siswa masih dapat menginput role yang tidak sesuai dengan pilihan yang ada (guru/staff/siswa)
+3. Membuat registrasi ulang, supaya siswa dapat menginput data ulnag ketika terjadi sebuah kesalahan.
+
+**Solusi**
+1. Mengecilkan treshold
+2. Membuat pilihan menjadi sebuah box, sehingga siswa tidak dapat mengetik pilihannya
+
+# Dokumentasi Hasil Testing Kepulangan
+**Date: 7 May 2025**
+1. Data telah tersimpan di dalam database attendance record
