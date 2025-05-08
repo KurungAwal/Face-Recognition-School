@@ -259,37 +259,3 @@ print(dlib.__version__)
 3. Jika wajahmu belum terdaftar: Layar akan menunjukkan press S to register. Kamu akan diminta untuk menuliskan nama lengkap dan peran. Setelah terdaftar maka wajahmu dapat dikenali secara otomatis saat absensi berikutnya.
 
 4. Setelah jam 15.00, ulangi menghadap kamera, setelah kamera mengenali dan menyapa "Selamat Jalan [Nama]" maka kamu sudah terabsen pulang.
-
-# Dokumentasi Hasil Riset
-**Library Alternatif**
-1. Dear PyGui sebagai pengganti tkinter
-
-**Perbandingannya dengan tkinter:**
-1. Dear PyGui memiliki performansi yang sangat cepat (GPU-Accelerated) dibandingkan dengan tkinter yang lambat untuk mendeteksi secara real time (CPU-Based)
-2. Dear PyGui memiliki tampilan UI yang lebih modern
-
-**Cara instalasi Dear PyGui**
-1. Jalankan perintah: 
-pip install dearpygui
-
-# Dokumentasi Hasil Testing Awal
-**Apa Saja yang Perlu Diperbaiki?**
-1. Kondisi kamera yang sering ngelag saat sudah register
-2. Tambahkan fitur login admin sebelum bisa melakukan registrasi wajah baru atau ekspor data
-3. Tambahkan fitur registrasi ulang
-
-# Dokumentasi Hasil Testing Keberangkatan
-**Date: 6 May 2025**
-
-**Apa Saja yang Perlu Diperbaiki?**
-1. Akurasi face_recognition kurang akurat. Terkadang target terdeteksi menjadi target lain.
-2. Siswa masih dapat menginput role yang tidak sesuai dengan pilihan yang ada (guru/staff/siswa)
-3. Membuat registrasi ulang, supaya siswa dapat menginput data ulnag ketika terjadi sebuah kesalahan.
-
-**Solusi**
-1. Mengecilkan treshold
-2. Membuat pilihan menjadi sebuah box, sehingga siswa tidak dapat mengetik pilihannya
-
-# Dokumentasi Hasil Testing Kepulangan
-**Date: 7 May 2025**
-1. Data telah tersimpan di dalam database attendance record
